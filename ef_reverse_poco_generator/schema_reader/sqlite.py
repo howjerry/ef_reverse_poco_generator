@@ -2,10 +2,19 @@
 from .base import SchemaReader
 
 class SQLiteSchemaReader(SchemaReader):
+    def __init__(self, db, naming_convention='original'):
+        super().__init__(db)
+        self.naming_convention = naming_convention
+
+    def format_name(self, name):
+        if self.naming_convention == 'camelcase':
+            return ''.join(word.capitalize() for word in name.split('_'))
+        return name
+        
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = {row[0]: {'description': ''} for row in cursor.fetchall()}  # SQLite doesn't support table comments natively
+        tables = {self.format_name(row[0]): {'description': ''} for row in cursor.fetchall()}  # SQLite doesn't support table comments natively
         cursor.close()
         return tables
 

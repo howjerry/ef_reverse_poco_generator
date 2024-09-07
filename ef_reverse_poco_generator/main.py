@@ -1,5 +1,5 @@
 import tkinter as tk
-from .reverse_poco_generator_gui import ReversePocoGeneratorGUI
+from ef_reverse_poco_generator.reverse_poco_generator_gui import ReversePocoGeneratorGUI
 
 def main():
     root = tk.Tk()

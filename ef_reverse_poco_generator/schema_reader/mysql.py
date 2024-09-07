@@ -2,6 +2,15 @@
 from .base import SchemaReader
 
 class MySQLSchemaReader(SchemaReader):
+    def __init__(self, db, naming_convention='original'):
+        super().__init__(db)
+        self.naming_convention = naming_convention
+    
+    def format_name(self, name):
+        if self.naming_convention == 'camelcase':
+            return ''.join(word.capitalize() for word in name.split('_'))
+        return name
+        
     def read_tables(self):
         cursor = self.db.cursor(dictionary=True)
         cursor.execute("""
@@ -13,7 +22,7 @@ class MySQLSchemaReader(SchemaReader):
             WHERE 
                 TABLE_SCHEMA = DATABASE()
         """)
-        tables = {row['TABLE_NAME']: {'description': row['TABLE_COMMENT']} for row in cursor.fetchall()}
+        tables = {self.format_name(row['TABLE_NAME']): {'description': row['TABLE_COMMENT']} for row in cursor.fetchall()}
         cursor.close()
         return tables
 

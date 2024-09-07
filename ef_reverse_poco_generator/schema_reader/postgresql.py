@@ -2,6 +2,15 @@
 from .base import SchemaReader
 
 class PostgreSQLSchemaReader(SchemaReader):
+    def __init__(self, db, naming_convention='original'):
+        super().__init__(db)
+        self.naming_convention = naming_convention
+
+    def format_name(self, name):
+        if self.naming_convention == 'camelcase':
+            return ''.join(word.capitalize() for word in name.split('_'))
+        return name
+    
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -120,7 +129,7 @@ class PostgreSQLSchemaReader(SchemaReader):
             WHERE 
                 pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
         """)
-        procedures = {row[0]: {
+        procedures = {self.format_name(row[0]): {
             'definition': row[1],
             'description': row[2] or ''
         } for row in cursor.fetchall()}

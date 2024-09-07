@@ -2,6 +2,15 @@
 from .base import SchemaReader
 
 class SQLServerSchemaReader(SchemaReader):
+    def __init__(self, db, naming_convention='original'):
+        super().__init__(db)
+        self.naming_convention = naming_convention
+
+    def format_name(self, name):
+        if self.naming_convention == 'camelcase':
+            return ''.join(word.capitalize() for word in name.split('_'))
+        return name
+    
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -13,7 +22,7 @@ class SQLServerSchemaReader(SchemaReader):
             LEFT JOIN 
                 sys.extended_properties p ON p.major_id = t.object_id AND p.minor_id = 0 AND p.name = 'MS_Description'
         """)
-        tables = {row.table_name: {'description': row.table_description or ''} for row in cursor.fetchall()}
+        tables = {self.format_name(row.table_name): {'description': row.table_description or ''} for row in cursor.fetchall()}
         cursor.close()
         return tables
 

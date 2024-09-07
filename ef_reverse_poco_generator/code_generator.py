@@ -156,6 +156,8 @@ namespace {{ namespace }}
             'date': 'DateTime',
             'time': 'TimeSpan',
             'bit': 'bool',
+            'bool': 'bool',
+            'boolean': 'bool',
             'decimal': 'decimal',
             'float': 'float',
             'double': 'double'

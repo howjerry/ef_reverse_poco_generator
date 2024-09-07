@@ -33,6 +33,7 @@ class MySQLSchemaReader(SchemaReader):
                 TABLE_NAME, 
                 COLUMN_NAME, 
                 DATA_TYPE, 
+                COLUMN_TYPE,
                 IS_NULLABLE, 
                 COLUMN_KEY,
                 COLUMN_COMMENT
@@ -45,9 +46,13 @@ class MySQLSchemaReader(SchemaReader):
         for row in cursor.fetchall():
             if row['TABLE_NAME'] not in columns:
                 columns[row['TABLE_NAME']] = []
+            
+            # Check if the column is TINYINT(1) or BOOLEAN
+            is_bool = row['DATA_TYPE'].lower() == 'tinyint' and row['COLUMN_TYPE'].lower() == 'tinyint(1)' or row['DATA_TYPE'].lower() == 'boolean'
+            
             columns[row['TABLE_NAME']].append({
                 'name': row['COLUMN_NAME'],
-                'type': row['DATA_TYPE'],
+                'type': 'bool' if is_bool else row['DATA_TYPE'],
                 'nullable': row['IS_NULLABLE'] == 'YES',
                 'primary_key': row['COLUMN_KEY'] == 'PRI',
                 'description': row['COLUMN_COMMENT']

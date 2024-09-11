@@ -3,14 +3,8 @@ from .base import SchemaReader
 
 class MySQLSchemaReader(SchemaReader):
     def __init__(self, db, naming_convention='original'):
-        super().__init__(db)
-        self.naming_convention = naming_convention
-    
-    def format_name(self, name):
-        if self.naming_convention == 'camelcase':
-            return ''.join(word.capitalize() for word in name.split('_'))
-        return name
-        
+        super().__init__(db, naming_convention)
+
     def read_tables(self):
         cursor = self.db.cursor(dictionary=True)
         cursor.execute("""
@@ -22,44 +16,33 @@ class MySQLSchemaReader(SchemaReader):
             WHERE 
                 TABLE_SCHEMA = DATABASE()
         """)
-        tables = {self.format_name(row['TABLE_NAME']): {'description': row['TABLE_COMMENT']} for row in cursor.fetchall()}
+        tables = {row['TABLE_NAME']: {'description': row['TABLE_COMMENT']} for row in cursor.fetchall()}
         cursor.close()
         return tables
 
-    def read_columns(self):
+    def read_primary_keys(self):
         cursor = self.db.cursor(dictionary=True)
         cursor.execute("""
             SELECT 
                 TABLE_NAME, 
-                COLUMN_NAME, 
-                DATA_TYPE, 
-                COLUMN_TYPE,
-                IS_NULLABLE, 
-                COLUMN_KEY,
-                COLUMN_COMMENT
+                COLUMN_NAME,
+                ORDINAL_POSITION
             FROM 
-                INFORMATION_SCHEMA.COLUMNS
+                INFORMATION_SCHEMA.KEY_COLUMN_USAGE
             WHERE 
                 TABLE_SCHEMA = DATABASE()
+                AND CONSTRAINT_NAME = 'PRIMARY'
+            ORDER BY 
+                TABLE_NAME, ORDINAL_POSITION
         """)
-        columns = {}
+        primary_keys = {}
         for row in cursor.fetchall():
-            if row['TABLE_NAME'] not in columns:
-                columns[row['TABLE_NAME']] = []
-            
-            # Check if the column is TINYINT(1) or BOOLEAN
-            is_bool = row['DATA_TYPE'].lower() == 'tinyint' and row['COLUMN_TYPE'].lower() == 'tinyint(1)' or row['DATA_TYPE'].lower() == 'boolean'
-            
-            columns[row['TABLE_NAME']].append({
-                'name': row['COLUMN_NAME'],
-                'type': 'bool' if is_bool else row['DATA_TYPE'],
-                'nullable': row['IS_NULLABLE'] == 'YES',
-                'primary_key': row['COLUMN_KEY'] == 'PRI',
-                'description': row['COLUMN_COMMENT']
-            })
+            if row['TABLE_NAME'] not in primary_keys:
+                primary_keys[row['TABLE_NAME']] = []
+            primary_keys[row['TABLE_NAME']].append(row['COLUMN_NAME'])
         cursor.close()
-        return columns
-
+        return primary_keys
+    
     def read_primary_keys(self):
         # Primary keys are already identified in read_columns for MySQL
         return {}
@@ -92,6 +75,7 @@ class MySQLSchemaReader(SchemaReader):
         cursor.close()
         return foreign_keys
 
+
     def read_procedures(self):
         cursor = self.db.cursor(dictionary=True)
         cursor.execute("""
@@ -107,7 +91,60 @@ class MySQLSchemaReader(SchemaReader):
         """)
         procedures = {row['ROUTINE_NAME']: {
             'definition': row['ROUTINE_DEFINITION'],
-            'description': row['ROUTINE_COMMENT']
+            'description': row['ROUTINE_COMMENT'],
+            'parameters': self.read_procedure_parameters(row['ROUTINE_NAME'])
         } for row in cursor.fetchall()}
         cursor.close()
         return procedures
+
+    def read_procedure_parameters(self, procedure_name):
+        cursor = self.db.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT 
+                PARAMETER_NAME,
+                DATA_TYPE,
+                PARAMETER_MODE
+            FROM 
+                INFORMATION_SCHEMA.PARAMETERS
+            WHERE 
+                SPECIFIC_SCHEMA = DATABASE()
+                AND SPECIFIC_NAME = %s
+            ORDER BY 
+                ORDINAL_POSITION
+        """, (procedure_name,))
+        parameters = [{'name': row['PARAMETER_NAME'], 'type': row['DATA_TYPE'], 'mode': row['PARAMETER_MODE']}
+                      for row in cursor.fetchall()]
+        cursor.close()
+        return parameters
+    
+    def read_columns(self):
+        cursor = self.db.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT 
+                TABLE_NAME,
+                COLUMN_NAME,
+                DATA_TYPE,
+                IS_NULLABLE,
+                COLUMN_KEY,
+                COLUMN_COMMENT
+            FROM 
+                INFORMATION_SCHEMA.COLUMNS
+            WHERE 
+                TABLE_SCHEMA = DATABASE()
+            ORDER BY 
+                TABLE_NAME, ORDINAL_POSITION
+        """)
+        columns = {}
+        for row in cursor.fetchall():
+            table_name = row['TABLE_NAME']
+            if table_name not in columns:
+                columns[table_name] = []
+            columns[table_name].append({
+                'name': row['COLUMN_NAME'],
+                'type': row['DATA_TYPE'],
+                'nullable': row['IS_NULLABLE'] == 'YES',
+                'primary_key': row['COLUMN_KEY'] == 'PRI',
+                'description': row['COLUMN_COMMENT']
+            })
+        cursor.close()
+        return columns

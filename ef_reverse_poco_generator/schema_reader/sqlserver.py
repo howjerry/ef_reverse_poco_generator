@@ -2,15 +2,6 @@
 from .base import SchemaReader
 
 class SQLServerSchemaReader(SchemaReader):
-    def __init__(self, db, naming_convention='original'):
-        super().__init__(db)
-        self.naming_convention = naming_convention
-
-    def format_name(self, name):
-        if self.naming_convention == 'camelcase':
-            return ''.join(word.capitalize() for word in name.split('_'))
-        return name
-    
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -22,7 +13,7 @@ class SQLServerSchemaReader(SchemaReader):
             LEFT JOIN 
                 sys.extended_properties p ON p.major_id = t.object_id AND p.minor_id = 0 AND p.name = 'MS_Description'
         """)
-        tables = {self.format_name(row.table_name): {'description': row.table_description or ''} for row in cursor.fetchall()}
+        tables = {row.table_name: {'description': row.table_description or ''} for row in cursor.fetchall()}
         cursor.close()
         return tables
 
@@ -64,7 +55,8 @@ class SQLServerSchemaReader(SchemaReader):
         cursor.execute("""
             SELECT 
                 t.name AS table_name,
-                c.name AS column_name
+                c.name AS column_name,
+                ic.key_ordinal
             FROM 
                 sys.tables t
             INNER JOIN 
@@ -75,6 +67,8 @@ class SQLServerSchemaReader(SchemaReader):
                 sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
             WHERE 
                 i.is_primary_key = 1
+            ORDER BY
+                t.name, ic.key_ordinal
         """)
         primary_keys = {}
         for row in cursor.fetchall():
@@ -82,7 +76,7 @@ class SQLServerSchemaReader(SchemaReader):
                 primary_keys[row.table_name] = []
             primary_keys[row.table_name].append(row.column_name)
         cursor.close()
-        return primary_keys
+        return primary_keys 
 
     def read_foreign_keys(self):
         cursor = self.db.cursor()
@@ -124,8 +118,8 @@ class SQLServerSchemaReader(SchemaReader):
         cursor.execute("""
             SELECT 
                 p.name AS procedure_name,
-                m.definition,
-                CAST(ep.value AS NVARCHAR(MAX)) AS description
+                m.definition AS procedure_definition,
+                CAST(ep.value AS NVARCHAR(MAX)) AS procedure_description
             FROM 
                 sys.procedures p
             INNER JOIN 
@@ -133,9 +127,43 @@ class SQLServerSchemaReader(SchemaReader):
             LEFT JOIN 
                 sys.extended_properties ep ON p.object_id = ep.major_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
         """)
-        procedures = {row.procedure_name: {
-            'definition': row.definition,
-            'description': row.description or ''
-        } for row in cursor.fetchall()}
+        procedures = {}
+        for row in cursor.fetchall():
+            procedure_name = row.procedure_name
+            procedures[procedure_name] = {
+                'definition': row.procedure_definition,
+                'description': row.procedure_description or '',
+                'parameters': self.read_procedure_parameters(procedure_name)
+            }
         cursor.close()
         return procedures
+
+    def read_procedure_parameters(self, procedure_name):
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT 
+                p.name AS parameter_name,
+                t.name AS parameter_type,
+                p.is_output AS is_output
+            FROM 
+                sys.parameters p
+            INNER JOIN 
+                sys.procedures sp ON p.object_id = sp.object_id
+            INNER JOIN 
+                sys.types t ON p.user_type_id = t.user_type_id
+            WHERE 
+                sp.name = ?
+            ORDER BY 
+                p.parameter_id
+        """, (procedure_name,))
+        
+        parameters = []
+        for row in cursor.fetchall():
+            parameters.append({
+                'name': row.parameter_name,
+                'type': row.parameter_type,
+                'mode': 'OUT' if row.is_output else 'IN'
+            })
+        
+        cursor.close()
+        return parameters

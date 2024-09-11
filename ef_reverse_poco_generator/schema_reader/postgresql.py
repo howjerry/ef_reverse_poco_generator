@@ -2,15 +2,6 @@
 from .base import SchemaReader
 
 class PostgreSQLSchemaReader(SchemaReader):
-    def __init__(self, db, naming_convention='original'):
-        super().__init__(db)
-        self.naming_convention = naming_convention
-
-    def format_name(self, name):
-        if self.naming_convention == 'camelcase':
-            return ''.join(word.capitalize() for word in name.split('_'))
-        return name
-    
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -60,7 +51,8 @@ class PostgreSQLSchemaReader(SchemaReader):
         cursor.execute("""
             SELECT 
                 tc.table_name, 
-                kcu.column_name
+                kcu.column_name,
+                kcu.ordinal_position
             FROM 
                 information_schema.table_constraints tc
             JOIN 
@@ -70,6 +62,8 @@ class PostgreSQLSchemaReader(SchemaReader):
             WHERE 
                 tc.constraint_type = 'PRIMARY KEY'
                 AND tc.table_schema = 'public'
+            ORDER BY 
+                tc.table_name, kcu.ordinal_position
         """)
         primary_keys = {}
         for row in cursor.fetchall():
@@ -78,7 +72,7 @@ class PostgreSQLSchemaReader(SchemaReader):
             primary_keys[row[0]].append(row[1])
         cursor.close()
         return primary_keys
-
+    
     def read_foreign_keys(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -119,19 +113,66 @@ class PostgreSQLSchemaReader(SchemaReader):
         cursor = self.db.cursor()
         cursor.execute("""
             SELECT 
-                proname,
-                prosrc,
-                description
+                p.proname AS procedure_name,
+                pg_get_functiondef(p.oid) AS procedure_definition,
+                d.description AS procedure_description
             FROM 
-                pg_proc
+                pg_proc p
             LEFT JOIN 
-                pg_description ON pg_proc.oid = pg_description.objoid
+                pg_description d ON p.oid = d.objoid
             WHERE 
-                pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+                p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+                AND p.prokind = 'p'
         """)
-        procedures = {self.format_name(row[0]): {
-            'definition': row[1],
-            'description': row[2] or ''
-        } for row in cursor.fetchall()}
+        procedures = {}
+        for row in cursor.fetchall():
+            procedure_name = row[0]
+            procedures[procedure_name] = {
+                'definition': row[1],
+                'description': row[2] or '',
+                'parameters': self.read_procedure_parameters(procedure_name)
+            }
         cursor.close()
         return procedures
+
+    def read_procedure_parameters(self, procedure_name):
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT 
+                p.proargnames AS parameter_names,
+                p.proargmodes AS parameter_modes,
+                p.proargtypes AS parameter_types
+            FROM 
+                pg_proc p
+            WHERE 
+                p.proname = %s
+                AND p.pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        """, (procedure_name,))
+        row = cursor.fetchone()
+        cursor.close()
+
+        if row is None:
+            return []
+
+        parameter_names = row[0]
+        parameter_modes = row[1]
+        parameter_types = row[2]
+
+        parameters = []
+        for i, name in enumerate(parameter_names):
+            mode = parameter_modes[i] if parameter_modes else 'IN'
+            type_oid = parameter_types[i]
+            
+            # Get the type name from the type OID
+            cursor = self.db.cursor()
+            cursor.execute("SELECT typname FROM pg_type WHERE oid = %s", (type_oid,))
+            type_name = cursor.fetchone()[0]
+            cursor.close()
+
+            parameters.append({
+                'name': name,
+                'type': type_name,
+                'mode': mode
+            })
+
+        return parameters

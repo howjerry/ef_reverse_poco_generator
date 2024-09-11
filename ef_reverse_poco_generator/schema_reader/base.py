@@ -2,8 +2,9 @@
 from abc import ABC, abstractmethod
 
 class SchemaReader(ABC):
-    def __init__(self, db):
+    def __init__(self, db, naming_convention='original'):
         self.db = db
+        self.naming_convention = naming_convention
 
     @abstractmethod
     def read_tables(self):
@@ -42,9 +43,7 @@ class SchemaReader(ABC):
 
         primary_keys = self.read_primary_keys()
         for table_name, pk_columns in primary_keys.items():
-            for column in schema['tables'][table_name]['columns']:
-                if column['name'] in pk_columns:
-                    column['primary_key'] = True
+            schema['tables'][table_name]['primary_key'] = pk_columns
 
         foreign_keys = self.read_foreign_keys()
         for table_name, fks in foreign_keys.items():

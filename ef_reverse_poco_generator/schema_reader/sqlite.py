@@ -2,19 +2,10 @@
 from .base import SchemaReader
 
 class SQLiteSchemaReader(SchemaReader):
-    def __init__(self, db, naming_convention='original'):
-        super().__init__(db)
-        self.naming_convention = naming_convention
-
-    def format_name(self, name):
-        if self.naming_convention == 'camelcase':
-            return ''.join(word.capitalize() for word in name.split('_'))
-        return name
-        
     def read_tables(self):
         cursor = self.db.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = {self.format_name(row[0]): {'description': ''} for row in cursor.fetchall()}  # SQLite doesn't support table comments natively
+        tables = {row[0]: {'description': ''} for row in cursor.fetchall()}  # SQLite doesn't support table comments natively
         cursor.close()
         return tables
 
@@ -36,8 +27,15 @@ class SQLiteSchemaReader(SchemaReader):
         return columns
 
     def read_primary_keys(self):
-        # Primary keys are already identified in read_columns for SQLite
-        return {}
+        cursor = self.db.cursor()
+        primary_keys = {}
+        for table_name in self.read_tables().keys():
+            cursor.execute(f"PRAGMA table_info({table_name})")
+            pk_columns = [column[1] for column in cursor.fetchall() if column[5] != 0]  # column[5] is the pk flag
+            if pk_columns:
+                primary_keys[table_name] = pk_columns
+        cursor.close()
+        return primary_keys
 
     def read_foreign_keys(self):
         cursor = self.db.cursor()

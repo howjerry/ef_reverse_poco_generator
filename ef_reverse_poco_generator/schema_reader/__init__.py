@@ -10,14 +10,17 @@ logger = logging.getLogger(__name__)
 def read_schema(db, naming_convention='original'):
     db_type = type(db).__name__
     logger.info(f"Reading schema for database type: {db_type}")
+    logger.debug(f"DB object attributes: {dir(db)}")
     
     if db_type in ['MySQLConnection', 'CMySQLConnection']:
-        return MySQLSchemaReader(db, naming_convention).read_schema()
+        reader = MySQLSchemaReader(db, naming_convention)
     elif db_type == 'connection' and hasattr(db, 'info'):  # PostgreSQL
-        return PostgreSQLSchemaReader(db, naming_convention).read_schema()
+        reader = PostgreSQLSchemaReader(db, naming_convention)
     elif db_type == 'Connection' and hasattr(db, 'getinfo'):  # SQL Server
-        return SQLServerSchemaReader(db, naming_convention).read_schema()
+        reader = SQLServerSchemaReader(db, naming_convention)
     elif db_type == 'Connection' and hasattr(db, 'cursor'):  # SQLite
-        return SQLiteSchemaReader(db, naming_convention).read_schema()
+        reader = SQLiteSchemaReader(db, naming_convention)
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
+    
+    return reader.read_schema()
